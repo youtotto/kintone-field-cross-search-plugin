@@ -251,7 +251,66 @@
     tableBody.appendChild(tr);
   }
 
+  // 汎用の初期値フォーマッタ（フィールド定義用）
+  function formatInitialValue(field) {
+    const t = field?.type;
+    const dv = field?.defaultValue;
 
+    // USER_SELECT / ORGANIZATION_SELECT は defaultValue が配列（Object or string）
+    if (t === 'USER_SELECT') {
+      // 例：[{ code:'user1', type:'USER' }, { code:'group1', type:'GROUP' }, { code:'LOGINUSER()', type:'FUNCTION' }]
+      const arr = Array.isArray(dv) ? dv : [];
+      return arr.map(e => {
+        if (e && typeof e === 'object') {
+          const kind = e.type;
+          const code = e.code;
+          if (kind === 'FUNCTION') {
+            // よく使う関数はラベル化（未知はそのまま表示）
+            if (code === 'LOGINUSER()') return 'ログインユーザー';
+            if (code === 'PRIMARY_ORGANIZATION()') return '主所属組織';
+            return code || '';
+          }
+          if (kind === 'USER') return `ユーザー:${code}`;
+          if (kind === 'GROUP') return `グループ:${code}`;
+          if (kind === 'ORGANIZATION') return `組織:${code}`;
+          return String(code ?? '');
+        }
+        // 念のため素の文字列にも対応
+        return String(e ?? '');
+      }).join(', ');
+    }
+
+    if (t === 'ORGANIZATION_SELECT') {
+      // 例：['org1', 'org2'] または [{ code:'org1', type:'ORGANIZATION' }]
+      const arr = Array.isArray(dv) ? dv : [];
+      return arr.map(e => {
+        if (e && typeof e === 'object') {
+
+          const kind = e.type;
+          const code = e.code;
+          if (kind === 'FUNCTION') {
+            // よく使う関数はラベル化（未知はそのまま表示）
+            if (code === 'PRIMARY_ORGANIZATION()') return '主所属組織';
+            return code || '';
+          }
+          if (kind === 'GROUP') return `グループ:${code}`;
+          if (kind === 'ORGANIZATION') return `組織:${code}`;
+          return `組織:${String(code ?? '')}`;
+        }
+
+        return `組織:${String(e ?? '')}`;
+      }).join(', ');
+    }
+
+    // それ以外は既存挙動に近いシンプル整形
+    if (dv == null) return '';
+    if (Array.isArray(dv)) return dv.join(', ');
+    if (typeof dv === 'object') {
+      // 既定では [object Object] にならないよう JSON文字列化（短く）
+      try { return JSON.stringify(dv); } catch { return String(dv); }
+    }
+    return String(dv);
+  }
 
   /* ─────────────────── イベント登録 ─────────────────── */
   saveBtn.addEventListener('click', save);
@@ -317,6 +376,7 @@
     for (const code of codes) {
       const field = fieldMap[code];
       if (!field) continue;
+      const defText = formatInitialValue(field);
 
       if (field.type === 'REFERENCE_TABLE') {
         // 1. 関連アプリIDを取得
@@ -324,7 +384,7 @@
         const relatedFieldCodes = field.referenceTable.displayFields;
 
         // 2. 表示用に関連レコード一覧フィールド本体を追加
-        appendRow(tbody, count++, field.label, field.code, field.type, 'row-reference', field.required, field.unique, field.defaultValue);
+        appendRow(tbody, count++, field.label, field.code, field.type, 'row-reference', field.required, field.unique, defText);
 
         // 3. 関連アプリからフィールド情報を取得
         const relatedFieldsResp = await kintone.api(
@@ -339,16 +399,17 @@
           const refField = relatedFieldProps[refCode];
           const label = refField?.label || '(不明なフィールド)';
           const type = refField?.type || '(?)';
-          appendRow(tbody, count++, `┗ ${label}`, refCode, type, 'row-reference-child', field.required, field.unique, field.defaultValue);
+          appendRow(tbody, count++, `┗ ${label}`, refCode, type, 'row-reference-child', field.required, field.unique, defText);
         }
       } else if (field.type === 'SUBTABLE') {
-        appendRow(tbody, count++, field.label, field.code, field.type, 'row-subtable', field.required, field.unique, field.defaultValue);
+        appendRow(tbody, count++, field.label, field.code, field.type, 'row-subtable', field.required, field.unique, defText);
         for (const subCode in field.fields) {
           const subField = field.fields[subCode];
-          appendRow(tbody, count++, `┗ ${subField.label}`, subField.code, subField.type, 'row-subtable-child', subField.required, subField.unique, subField.defaultValue);
+          const subDef = formatInitialValue(subField); 
+          appendRow(tbody, count++, `┗ ${subField.label}`, subField.code, subField.type, 'row-subtable-child', subField.required, subField.unique, subDef);
         }
       } else {
-        appendRow(tbody, count++, field.label, field.code, field.type, '', field.required, field.unique, field.defaultValue);
+        appendRow(tbody, count++, field.label, field.code, field.type, '', field.required, field.unique, defText);
       }
     }
 
