@@ -103,4 +103,5 @@ MIT License
 
 ## 作者
 GitHub: https://github.com/youtotto
+
 kintone プラグイン開発者
