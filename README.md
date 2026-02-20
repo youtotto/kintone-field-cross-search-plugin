@@ -16,7 +16,7 @@ AND / OR 条件で柔軟な検索を行うことができます。
 
 ### 🔍 複数フィールド横断検索
 
-<img width="1770" height="1205" alt="スクリーンショット 2026-01-15 133240" src="https://github.com/user-attachments/assets/5f53c205-f158-42ab-b9cc-e55695407086" />
+<img width="1770" height="1205" alt="スクリーンショット 2026-01-15 133240" src="https://github.com/user-attachments/assets/5f53c205-f158-42ab-b9cc-e55695407086" /> 
 
 - テキスト（like）
 - ドロップダウン（in）
