@@ -6,3 +6,6 @@ private.key
 .env
 .vscode/
 .DS_Store
+
+# 実機確認用の一時ビルド（正式配布物はリポジトリ直下の field-cross-search-plugin.zip）
+build/

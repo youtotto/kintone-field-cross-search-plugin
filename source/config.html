@@ -1,506 +1,331 @@
-<!-- config.html -->
-<!DOCTYPE html>
-<html lang="ja">
+<!-- config.html
+  kintone プラグインの設定画面用 HTML は body 内の要素だけを記述する（公式仕様）。
+  config.js は manifest.json の config.js から読み込まれるため、ここに script タグは置かない。
+-->
+<link rel="stylesheet" href="https://js.cybozu.com/k/2.0.0/css/cybozu.css">
 
-<head>
-  <meta charset="utf-8" />
-  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-  <title>アプリ内横断検索プラグイン 設定</title>
-
-  <!-- kintone plugin config 共通CSS（kintone標準UIに寄せるなら） -->
-  <link rel="stylesheet" href="https://js.cybozu.com/k/2.0.0/css/cybozu.css">
-
-  <style>
-    /* ===============================
-   *  横断検索プラグイン 設定画面（軽量CSS / 修正版）
-   *  - 基本設定を 1行3カラム（レスポンシブで 2列→1列）
-   *  - フィールド一覧は 3カラムカード
-   *  - .nrc-badge の二重定義を解消（用途別にクラス分離）
+<style>
+  /* ===============================
+   *  横断検索プラグイン 設定画面
    * =============================== */
 
-    body {
-      margin: 0;
-      padding: 16px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
-        Arial, "Noto Sans JP", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
-      line-height: 1.5;
-      background: #fff;
+  .nrc-wrap {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 16px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+      Arial, "Noto Sans JP", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+    line-height: 1.5;
+    background: #fff;
+  }
+
+  .nrc-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .nrc-title {
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .nrc-sub {
+    color: #666;
+    font-size: 12px;
+  }
+
+  .nrc-card {
+    background: #fff;
+    border: 1px solid #e6e6e6;
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 14px;
+  }
+
+  .nrc-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  @media (min-width: 980px) {
+    .nrc-grid--2 {
+      grid-template-columns: 1fr 1fr;
     }
+  }
 
-    .nrc-wrap {
-      max-width: 1100px;
-      margin: 0 auto;
-    }
+  .nrc-input[type="number"] {
+    width: 80px;
+    text-align: right;
+  }
 
-    .nrc-head {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 12px;
-    }
+  .nrc-row {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 6px;
+    align-items: center;
+  }
 
-    .nrc-title {
-      font-size: 18px;
-      font-weight: 700;
-    }
+  .nrc-label {
+    font-weight: 700;
+    font-size: 13px;
+  }
 
-    .nrc-sub {
-      color: #666;
-      font-size: 12px;
-    }
+  .nrc-input,
+  .nrc-select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border: 1px solid #d7d7d7;
+    border-radius: 8px;
+    font-size: 13px;
+    background: #fff;
+  }
 
-    .nrc-card {
-      background: #fff;
-      border: 1px solid #e6e6e6;
-      border-radius: 10px;
-      padding: 14px;
-      margin-bottom: 14px;
-    }
+  .nrc-input:focus-visible,
+  .nrc-select:focus-visible,
+  .nrc-btn:focus-visible {
+    outline: 2px solid #1d6fdc;
+    outline-offset: 1px;
+  }
 
-    /* -------------------------------
-   * Grid
-   * ------------------------------- */
+  .nrc-fieldListHead {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
 
-    .nrc-grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 10px;
-    }
+  .nrc-fieldListTools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
 
-    @media (min-width: 980px) {
-      .nrc-grid--2 {
-        grid-template-columns: 1fr 1fr;
-      }
-    }
+  .nrc-searchBox {
+    width: 280px;
+    max-width: 100%;
+  }
 
-    /* ✅ 基本設定：1行3カラム */
-    .nrc-grid--3 {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 20px;
-    }
+  .nrc-tableWrap {
+    overflow: auto;
+    border: 1px solid #ededed;
+    border-radius: 10px;
+    padding: 12px;
+    background: #fff;
+  }
 
-    /* 数値入力はコンパクトに */
-    .nrc-input[type="number"] {
-      width: 80px;
-      /* ← おすすめ 70〜90px */
-      text-align: right;
-      /* 数値なので右寄せ */
-    }
+  table.nrc-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 880px;
+    background: #fff;
+  }
 
-    @media (max-width: 1100px) {
-      .nrc-grid--3 {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-    }
+  .nrc-table th,
+  .nrc-table td {
+    padding: 10px;
+    border-bottom: 1px solid #f0f0f0;
+    vertical-align: top;
+    font-size: 13px;
+  }
 
-    @media (max-width: 780px) {
-      .nrc-grid--3 {
-        grid-template-columns: 1fr;
-      }
-    }
+  .nrc-table th {
+    position: sticky;
+    top: 0;
+    background: #fafafa;
+    z-index: 1;
+    text-align: left;
+    font-weight: 700;
+  }
 
-    /* ラベルとINPUTを近づける（共通） */
-    .nrc-row {
-      display: grid;
-      grid-template-columns: 120px 1fr;
-      /* ← 180px → 120px */
-      gap: 6px;
-      /* ← 10px → 6px */
-      align-items: center;
-      /* ← start → center */
-    }
+  .nrc-badge {
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    color: #111827;
+    white-space: nowrap;
+  }
 
-    /* 3カラム用（さらにコンパクト） */
-    .nrc-grid--3 .nrc-row {
-      grid-template-columns: 110px 1fr;
-      /* さらに少しだけ詰める */
-    }
+  .nrc-muted {
+    color: #666;
+    font-size: 12px;
+  }
 
-    .nrc-label {
-      font-weight: 700;
-      font-size: 13px;
-    }
+  .nrc-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    align-items: center;
+    margin-top: 12px;
+  }
 
-    .nrc-help {
-      color: #666;
-      font-size: 12px;
-      margin-top: 4px;
-    }
+  .nrc-btn {
+    appearance: none;
+    border: 1px solid #d7d7d7;
+    background: #fff;
+    border-radius: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
+    font-size: 13px;
+  }
 
-    .nrc-input,
-    .nrc-textarea,
-    .nrc-select {
-      width: 100%;
-      box-sizing: border-box;
-      padding: 8px 10px;
-      border: 1px solid #d7d7d7;
-      border-radius: 8px;
-      outline: none;
-      font-size: 13px;
-      background: #fff;
-    }
+  .nrc-btn--primary {
+    background: #1f2937;
+    border-color: #1f2937;
+    color: #fff;
+    font-weight: 700;
+  }
 
-    .nrc-textarea {
-      min-height: 90px;
-      resize: vertical;
-    }
+  .nrc-btn[disabled] {
+    opacity: .5;
+    cursor: not-allowed;
+  }
 
-    .nrc-inline {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-    }
+  .nrc-note {
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    color: #374151;
+    font-size: 12px;
+  }
 
-    /* ✅ バッジ（ヘッダー用：大きめ） */
-    .nrc-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 8px;
-      border: 1px solid #e6e6e6;
-      border-radius: 999px;
-      font-size: 12px;
-      color: #444;
-      background: #fafafa;
-      white-space: nowrap;
-    }
+  .nrc-warnBox {
+    display: none;
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid #fde68a;
+    background: #fffbeb;
+    color: #92400e;
+    font-size: 12px;
+    white-space: pre-wrap;
+  }
 
-    /* -------------------------------
-   * Search 대상フィールド周り
-   * ------------------------------- */
+  .nrc-warnBox.is-show {
+    display: block;
+  }
 
-    .nrc-fieldListHead {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 10px;
-    }
+  .nrc-error {
+    display: none;
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid #fecaca;
+    background: #fff1f2;
+    color: #991b1b;
+    font-size: 12px;
+    white-space: pre-wrap;
+  }
 
-    .nrc-fieldListTools {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-    }
+  .nrc-error.is-show {
+    display: block;
+  }
 
-    .nrc-searchBox {
-      width: 280px;
-      max-width: 100%;
-    }
+  .nrc-right {
+    text-align: right;
+  }
+</style>
 
-    /* ✅ タブを削除するなら、この2つは不要（残しても害はなし） */
-    .nrc-tabs {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin: 10px 0;
-    }
-
-    .nrc-tab {
-      border: 1px solid #e6e6e6;
-      background: #fff;
-      border-radius: 999px;
-      padding: 6px 10px;
-      font-size: 12px;
-      cursor: pointer;
-      user-select: none;
-    }
-
-    .nrc-tab[aria-selected="true"] {
-      border-color: #c7d2fe;
-      background: #eef2ff;
-      font-weight: 700;
-    }
-
-    /* テーブルラッパ（カードでも流用） */
-    .nrc-tableWrap {
-      overflow: auto;
-      border: 1px solid #ededed;
-      border-radius: 10px;
-      padding: 12px;
-      /* ✅ カード表示の余白 */
-      background: #fff;
-    }
-
-    /* （旧）テーブル：使わないなら削除OK */
-    table.nrc-table {
-      width: 100%;
-      border-collapse: collapse;
-      min-width: 880px;
-      background: #fff;
-    }
-
-    .nrc-table th,
-    .nrc-table td {
-      padding: 10px;
-      border-bottom: 1px solid #f0f0f0;
-      vertical-align: top;
-      font-size: 13px;
-    }
-
-    .nrc-table th {
-      position: sticky;
-      top: 0;
-      background: #fafafa;
-      z-index: 1;
-      text-align: left;
-      font-weight: 700;
-    }
-
-    /* ✅ 3カラムカード（検索対象フィールド） */
-    .nrc-field-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 12px;
-    }
-
-    @media (max-width: 1100px) {
-      .nrc-field-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-    }
-
-    @media (max-width: 780px) {
-      .nrc-field-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .nrc-field-card {
-      border: 1px solid #e5e7eb;
-      background: #fff;
-      border-radius: 14px;
-      padding: 12px;
-      display: flex;
-      gap: 10px;
-      align-items: flex-start;
-    }
-
-    .nrc-field-card:hover {
-      border-color: #cbd5e1;
-    }
-
-    .nrc-field-main {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .nrc-field-title {
-      font-weight: 700;
-      font-size: 13px;
-      line-height: 1.25;
-      margin-bottom: 6px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .nrc-field-sub {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      font-size: 12px;
-      color: #6b7280;
-    }
-
-    /* ✅ カード内バッジ（小さめ） */
-    .nrc-badge {
-      border: 1px solid #e5e7eb;
-      background: #f9fafb;
-      padding: 2px 8px;
-      border-radius: 999px;
-      font-size: 11px;
-      color: #111827;
-      white-space: nowrap;
-    }
-
-    .nrc-code {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    }
-
-    .nrc-card-check {
-      margin-top: 2px;
-    }
-
-    /* -------------------------------
-   * Misc
-   * ------------------------------- */
-
-    .nrc-muted {
-      color: #666;
-      font-size: 12px;
-    }
-
-    .nrc-actions {
-      display: flex;
-      gap: 10px;
-      justify-content: flex-end;
-      align-items: center;
-      margin-top: 12px;
-    }
-
-    .nrc-btn {
-      appearance: none;
-      border: 1px solid #d7d7d7;
-      background: #fff;
-      border-radius: 10px;
-      padding: 10px 14px;
-      cursor: pointer;
-      font-size: 13px;
-    }
-
-    .nrc-btn--primary {
-      background: #1f2937;
-      border-color: #1f2937;
-      color: #fff;
-      font-weight: 700;
-    }
-
-    .nrc-btn[disabled] {
-      opacity: .5;
-      cursor: not-allowed;
-    }
-
-    .nrc-note {
-      padding: 10px 12px;
-      border-radius: 10px;
-      border: 1px solid #e5e7eb;
-      background: #f9fafb;
-      color: #374151;
-      font-size: 12px;
-    }
-
-    .nrc-error {
-      display: none;
-      margin-top: 10px;
-      padding: 10px 12px;
-      border-radius: 10px;
-      border: 1px solid #fecaca;
-      background: #fff1f2;
-      color: #991b1b;
-      font-size: 12px;
-      white-space: pre-wrap;
-    }
-
-    .nrc-error.is-show {
-      display: block;
-    }
-
-    .nrc-right {
-      text-align: right;
-    }
-  </style>
-</head>
-
-<body>
-  <div class="nrc-wrap">
-    <div class="nrc-head">
-      <div>
-        <div class="nrc-title">アプリ内横断検索プラグイン 設定</div>
-        <div class="nrc-sub">検索バー1つで、複数フィールドをまとめて絞り込みます。</div>
-      </div>
-      <div class="nrc-sub nrc-right">
-        <span class="nrc-badge">対象：このアプリ内</span>
-        <span class="nrc-badge">query自動生成</span>
-      </div>
+<div class="nrc-wrap">
+  <div class="nrc-head">
+    <div>
+      <div class="nrc-title">アプリ内横断検索プラグイン 設定</div>
+      <div class="nrc-sub">検索バー1つで、複数フィールドをまとめて絞り込みます。</div>
     </div>
-
-    <!-- ========== 基本設定 ========== -->
-    <section class="nrc-card">
-      <div class="nrc-grid nrc-grid--2">
-
-        <!-- 入力の解釈（スペース区切り AND/OR） -->
-        <div class="nrc-row" style="margin-left: 40px">
-          <div class="nrc-label">スペース区切り</div>
-          <div>
-            <select id="spaceJoin" class="nrc-select" style="width:auto;">
-              <option value="and">AND（すべて含む）</option>
-              <option value="or">OR（いずれか含む）</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- 検索語の上限 -->
-        <div class="nrc-row" style="margin-left: 20px">
-          <div class="nrc-label">検索語の上限</div>
-          <div>
-            <input id="maxTokens" class="nrc-input" type="number" min="1" max="10" value="3">
-          </div>
-        </div>
-      </div>
-
-      <div id="errBasic" class="nrc-error"></div>
-    </section>
-
-    <!-- ========== 検索対象フィールド ========== -->
-    <section class="nrc-card">
-      <div class="nrc-fieldListHead">
-        <div>
-          <div class="nrc-label" style="padding-top:0;">検索対象フィールド</div>
-          <div class="nrc-muted">チェックしたフィールドが検索対象になります（フィールドタイプに応じて like / in を自動適用）。</div>
-        </div>
-
-        <div class="nrc-fieldListTools">
-          <input id="fieldFilter" class="nrc-input nrc-searchBox" type="text" placeholder="フィールド名/コードで絞り込み">
-          <button id="btnSelectAll" class="nrc-btn" type="button">表示中を全選択</button>
-          <button id="btnUnselectAll" class="nrc-btn" type="button">表示中を全解除</button>
-        </div>
-      </div>
-
-      <div class="nrc-tableWrap">
-        <table class="nrc-table">
-          <thead>
-            <tr>
-              <th style="width:72px;">対象</th>
-              <th style="width:240px;">フィールド名</th>
-              <th style="width:220px;">フィールドコード</th>
-              <th style="width:160px;">タイプ</th>
-              <th style="width:120px;">演算子</th>
-            </tr>
-          </thead>
-          <tbody id="fieldTbody">
-            <!-- config.js で行を描画する -->
-            <!-- サンプル行（実運用では削除OK）
-            <tr>
-              <td><input type="checkbox" data-code="顧客名"></td>
-              <td>顧客名</td>
-              <td><code>顧客名</code></td>
-              <td>文字列（1行）</td>
-              <td><span class="nrc-badge">like</span></td>
-              <td class="nrc-muted">部分一致</td>
-            </tr>
-            -->
-          </tbody>
-        </table>
-      </div>
-
-      <div class="nrc-note" style="margin-top:10px;">
-        <div style="font-weight:700; margin-bottom:6px;">運用メモ</div>
-        <ul style="margin:0; padding-left: 18px;">
-          <li>添付ファイルは <b>ファイル名</b> も検索できます（※内容がヒットする場合もあるため注意書きを推奨）。</li>
-          <li>ドロップダウン / ラジオ / チェックボックス / 複数選択は <b>in</b> を使用します。</li>
-        </ul>
-      </div>
-
-      <div id="errFields" class="nrc-error"></div>
-    </section>
-
-    <!-- ========== 保存ボタン ========== -->
-    <div class="nrc-actions">
-      <button id="btnCancel" class="nrc-btn" type="button">キャンセル</button>
-      <button id="btnSave" class="nrc-btn nrc-btn--primary" type="button">保存</button>
+    <div class="nrc-sub nrc-right">
+      <span class="nrc-badge">対象：このアプリ内</span>
     </div>
   </div>
 
-  <!-- kintone plugin config API -->
-  <script src="https://js.cybozu.com/k/2.0.0/js/kintone.js"></script>
-  <!-- あなたの config.js を読み込む -->
-  <script src="config.js"></script>
-</body>
+  <!-- ========== 基本設定 ========== -->
+  <section class="nrc-card">
+    <div class="nrc-grid nrc-grid--2">
 
-</html>
+      <!-- 複数の語を入力したときの扱い（一覧画面を開いたときの初期値） -->
+      <div class="nrc-row">
+        <label class="nrc-label" for="spaceJoin">AND / OR の初期値</label>
+        <div>
+          <select id="spaceJoin" class="nrc-select" style="width:auto;">
+            <option value="and">AND（すべて含む）</option>
+            <option value="or">OR（いずれか含む）</option>
+          </select>
+          <div class="nrc-muted">検索画面を開いたときの AND / OR の初期値を設定します。利用者は一覧画面上で切り替えられます。</div>
+        </div>
+      </div>
+
+      <!-- 検索語の上限 -->
+      <div class="nrc-row">
+        <label class="nrc-label" for="maxTokens">検索語の上限</label>
+        <div>
+          <input id="maxTokens" class="nrc-input" type="number" min="1" max="10" value="5">
+          <span class="nrc-muted">1〜10。超えた語は検索に使われず、一覧画面で利用者に通知されます。</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="errBasic" class="nrc-error"></div>
+  </section>
+
+  <!-- ========== 検索対象フィールド ========== -->
+  <section class="nrc-card">
+    <div class="nrc-fieldListHead">
+      <div>
+        <div class="nrc-label" style="padding-top:0;">検索対象フィールド</div>
+        <div class="nrc-muted">チェックしたフィールドが検索対象になります（文字列は部分一致、選択肢は完全一致で検索します）。</div>
+      </div>
+
+      <div class="nrc-fieldListTools">
+        <input id="fieldFilter" class="nrc-input nrc-searchBox" type="text" aria-label="フィールド名またはフィールドコードで絞り込み" placeholder="フィールド名/コードで絞り込み">
+        <button id="btnSelectAll" class="nrc-btn" type="button">表示中を全選択</button>
+        <button id="btnUnselectAll" class="nrc-btn" type="button">表示中を全解除</button>
+      </div>
+    </div>
+
+    <div class="nrc-tableWrap">
+      <table class="nrc-table">
+        <thead>
+          <tr>
+            <th style="width:72px;">対象</th>
+            <th style="width:240px;">フィールド名</th>
+            <th style="width:220px;">フィールドコード</th>
+            <th style="width:160px;">タイプ</th>
+            <th style="width:120px;">一致方法</th>
+          </tr>
+        </thead>
+        <tbody id="fieldTbody">
+          <!-- config.js で行を描画する -->
+        </tbody>
+      </table>
+    </div>
+
+    <div id="warnMissing" class="nrc-warnBox"></div>
+
+    <div class="nrc-note" style="margin-top:10px;">
+      <div style="font-weight:700; margin-bottom:6px;">運用メモ</div>
+      <ul style="margin:0; padding-left: 18px;">
+        <li>文字列（1行／複数行）・リッチエディター・リンクは <b>部分一致</b> で検索します。</li>
+        <li>添付ファイルは <b>ファイル名</b> を部分一致で検索します（ファイルの内容がヒットする場合もあります）。</li>
+        <li>ドロップダウン / ラジオボタン / チェックボックス / 複数選択は、入力した語が <b>選択肢と完全に一致</b> した場合だけ検索されます。</li>
+        <li>数値・日付・ユーザー選択などは対象外です（kintone 標準の絞り込みをご利用ください）。</li>
+      </ul>
+    </div>
+
+    <div id="errFields" class="nrc-error"></div>
+  </section>
+
+  <!-- ========== 保存ボタン ========== -->
+  <div class="nrc-actions">
+    <button id="btnCancel" class="nrc-btn" type="button">キャンセル</button>
+    <button id="btnSave" class="nrc-btn nrc-btn--primary" type="button">保存</button>
+  </div>
+</div>
