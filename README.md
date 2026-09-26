@@ -1,5 +1,22 @@
 ## 概要
 
+## 公式リンク
+
+- [無料版の配布ページ](https://github.com/youtotto/kintone-field-cross-search-plugin)
+- [紹介ページ](https://www.nestrec.com/post/kintone%E3%81%AE%E4%B8%80%E8%A6%A7%E6%A4%9C%E7%B4%A2%E3%82%92%E6%8B%A1%E5%BC%B5%E3%81%99%E3%82%8B%EF%BC%9A%E8%A4%87%E6%95%B0%E3%83%95%E3%82%A3%E3%83%BC%E3%83%AB%E3%83%89%E6%A8%AA%E6%96%AD%E6%A4%9C%E7%B4%A2%E3%83%97%E3%83%A9%E3%82%B0%E3%82%A4%E3%83%B3%E3%81%AE%E8%A8%AD%E8%A8%88%E3%81%A8%E5%AE%9F%E8%A3%85)
+
+## ダウンロードと導入
+
+[Releases](https://github.com/youtotto/kintone-field-cross-search-plugin/releases/latest) から次のファイルをダウンロードします。
+
+| ファイル | 用途 |
+|---|---|
+| `field-cross-search-1.0.1-free-bundle.zip` | 説明書付きの配布用 ZIP（おすすめ）。**ZIP を解凍し、中の `field-cross-search-1.0.1-free-plugin.zip` を kintone へ読み込みます。bundle 自体は kintone に直接読み込みません** |
+| `field-cross-search-1.0.1-free-plugin.zip` | kintone に直接読み込むプラグイン（bundle の中身と同じファイル） |
+| `SHA256SUMS.txt` | 上記 ZIP の SHA-256 |
+
+kintone への読み込みは、kintone システム管理 →「プラグイン」→「読み込む」で `field-cross-search-1.0.1-free-plugin.zip` を ZIP のまま選びます。
+
 このプラグインは、kintone の一覧画面に複数フィールドを横断して検索できる UI を追加します。
 
 テキスト（文字列・リッチエディター・リンク）、選択肢（ドロップダウン・ラジオボタン・チェックボックス・複数選択）、添付ファイルを対象に、
