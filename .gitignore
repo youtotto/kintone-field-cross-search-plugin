@@ -9,3 +9,6 @@ private.key
 
 # 実機確認用の一時ビルド（正式配布物はリポジトリ直下の field-cross-search-plugin.zip）
 build/
+
+# 実機確認の手順書・結果（検証環境の情報を含むため、ローカルにだけ置く）
+verification/

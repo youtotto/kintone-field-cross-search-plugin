@@ -1,12 +1,12 @@
 <!-- config.html
   kintone プラグインの設定画面用 HTML は body 内の要素だけを記述する（公式仕様）。
-  config.js は manifest.json の config.js から読み込まれるため、ここに script タグは置かない。
+  ls-core.js / config.js は manifest.json の config.js から読み込まれるため、ここに script タグは置かない。
 -->
 <link rel="stylesheet" href="https://js.cybozu.com/k/2.0.0/css/cybozu.css">
 
 <style>
   /* ===============================
-   *  横断検索プラグイン 設定画面
+   *  一覧サポート 設定画面
    * =============================== */
 
   .nrc-wrap {
@@ -17,7 +17,10 @@
       Arial, "Noto Sans JP", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
     line-height: 1.5;
     background: #fff;
+    color: #1f2937;
   }
+
+  .nrc-wrap [hidden] { display: none !important; }
 
   .nrc-head {
     display: flex;
@@ -87,7 +90,10 @@
 
   .nrc-input:focus-visible,
   .nrc-select:focus-visible,
-  .nrc-btn:focus-visible {
+  .nrc-btn:focus-visible,
+  .ls-switch input:focus-visible,
+  .ls-list input:focus-visible,
+  .ls-list select:focus-visible {
     outline: 2px solid #1d6fdc;
     outline-offset: 1px;
   }
@@ -234,94 +240,350 @@
   .nrc-right {
     text-align: right;
   }
+
+  /* ===== 機能ごとの見出しとオン・オフ ===== */
+  .ls-secHead {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 14px;
+  }
+
+  .ls-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+  }
+
+  .ls-switch input {
+    width: 16px;
+    height: 16px;
+  }
+
+  .ls-secTitle {
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .ls-secBody {
+    margin-top: 12px;
+  }
+
+  .ls-limit {
+    font-size: 11px;
+    color: #6b7280;
+  }
+
+  /* ===== 項目の一覧（フィルター・ボタン・集計・装飾） ===== */
+  .ls-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .ls-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid #eceef1;
+    border-radius: 10px;
+    background: #fbfcfd;
+    font-size: 13px;
+  }
+
+  .ls-item select,
+  .ls-item input[type="text"],
+  .ls-item input[type="number"],
+  .ls-item input[type="date"] {
+    box-sizing: border-box;
+    padding: 6px 8px;
+    border: 1px solid #d7d7d7;
+    border-radius: 8px;
+    font-size: 13px;
+    background: #fff;
+    max-width: 220px;
+  }
+
+  .ls-item input[type="number"] {
+    width: 90px;
+  }
+
+  .ls-item--rule {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ls-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ls-grow {
+    flex: 1 1 auto;
+  }
+
+  .ls-typeTag {
+    font-size: 11px;
+    color: #6b7280;
+  }
+
+  .ls-remove {
+    appearance: none;
+    border: 1px solid #e5e7eb;
+    background: #fff;
+    border-radius: 8px;
+    padding: 5px 9px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #6b7280;
+  }
+
+  .ls-button {
+    padding: 10px 12px;
+    border: 1px solid #e3e6ea;
+    border-radius: 12px;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .ls-buttonHead {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ls-buttonHead input[type="text"] {
+    box-sizing: border-box;
+    padding: 7px 10px;
+    border: 1px solid #d7d7d7;
+    border-radius: 8px;
+    font-size: 13px;
+    width: 220px;
+  }
+
+  .ls-and {
+    font-size: 11px;
+    color: #6b7280;
+    font-weight: 700;
+  }
+
+  .ls-options {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    max-width: 520px;
+  }
+
+  .ls-options label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+  }
+
+  .ls-addRow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .ls-addRow .nrc-select {
+    width: auto;
+    min-width: 220px;
+  }
+
+  .ls-swatch {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
+    font-size: 12px;
+    color: #1f2937;
+    background: #fff;
+  }
 </style>
 
 <div class="nrc-wrap">
   <div class="nrc-head">
     <div>
-      <div class="nrc-title">アプリ内横断検索プラグイン 設定</div>
-      <div class="nrc-sub">検索バー1つで、複数フィールドをまとめて絞り込みます。</div>
+      <div class="nrc-title">一覧サポート 設定</div>
+      <div class="nrc-sub">一覧で「探す・見落とさない・合計を知る」をその場で。使う機能だけをオンにしてください。</div>
     </div>
     <div class="nrc-sub nrc-right">
-      <span class="nrc-badge">対象：このアプリ内</span>
+      <span class="nrc-badge">無料版</span>
+      <span class="nrc-badge">対象：このアプリの一覧</span>
     </div>
   </div>
 
-  <!-- ========== 基本設定 ========== -->
-  <section class="nrc-card">
-    <div class="nrc-grid nrc-grid--2">
+  <div id="migrateNote" class="nrc-note" style="margin-bottom:14px;" hidden>
+    アプリ内横断検索プラグインの設定を引き継ぎました。横断検索はこれまでどおり使えます。
+    保存すると、一覧サポートの設定が追加されます（これまでの横断検索の設定はそのまま残ります）。
+  </div>
 
-      <!-- 複数の語を入力したときの扱い（一覧画面を開いたときの初期値） -->
-      <div class="nrc-row">
-        <label class="nrc-label" for="spaceJoin">AND / OR の初期値</label>
-        <div>
-          <select id="spaceJoin" class="nrc-select" style="width:auto;">
-            <option value="and">AND（すべて含む）</option>
-            <option value="or">OR（いずれか含む）</option>
-          </select>
-          <div class="nrc-muted">検索画面を開いたときの AND / OR の初期値を設定します。利用者は一覧画面上で切り替えられます。</div>
+  <!-- ========== 横断検索 ========== -->
+  <section class="nrc-card" id="secSearch">
+    <div class="ls-secHead">
+      <label class="ls-switch"><input type="checkbox" id="searchEnabled"><span class="ls-secTitle">横断検索</span></label>
+      <span class="nrc-muted">一覧の上部の検索バーで、複数のフィールドをまとめてキーワード検索します。</span>
+    </div>
+
+    <div id="searchBody" class="ls-secBody">
+      <div class="nrc-grid nrc-grid--2">
+
+        <!-- 複数の語を入力したときの扱い（一覧画面を開いたときの初期値） -->
+        <div class="nrc-row">
+          <label class="nrc-label" for="spaceJoin">AND / OR の初期値</label>
+          <div>
+            <select id="spaceJoin" class="nrc-select" style="width:auto;">
+              <option value="and">AND（すべて含む）</option>
+              <option value="or">OR（いずれか含む）</option>
+            </select>
+            <div class="nrc-muted">検索画面を開いたときの AND / OR の初期値を設定します。利用者は一覧画面上で切り替えられます。</div>
+          </div>
+        </div>
+
+        <!-- 検索語の上限 -->
+        <div class="nrc-row">
+          <label class="nrc-label" for="maxTokens">検索語の上限</label>
+          <div>
+            <input id="maxTokens" class="nrc-input" type="number" min="1" max="10" value="5">
+            <span class="nrc-muted">1〜10。超えた語は検索に使われず、一覧画面で利用者に通知されます。</span>
+          </div>
         </div>
       </div>
 
-      <!-- 検索語の上限 -->
-      <div class="nrc-row">
-        <label class="nrc-label" for="maxTokens">検索語の上限</label>
+      <div id="errBasic" class="nrc-error"></div>
+
+      <div class="nrc-fieldListHead" style="margin-top:14px;">
         <div>
-          <input id="maxTokens" class="nrc-input" type="number" min="1" max="10" value="5">
-          <span class="nrc-muted">1〜10。超えた語は検索に使われず、一覧画面で利用者に通知されます。</span>
+          <div class="nrc-label" style="padding-top:0;">検索対象フィールド</div>
+          <div class="nrc-muted">チェックしたフィールドが検索対象になります（文字列は部分一致、選択肢は完全一致で検索します）。</div>
+        </div>
+
+        <div class="nrc-fieldListTools">
+          <input id="fieldFilter" class="nrc-input nrc-searchBox" type="text" aria-label="フィールド名またはフィールドコードで絞り込み" placeholder="フィールド名/コードで絞り込み">
+          <button id="btnSelectAll" class="nrc-btn" type="button">表示中を全選択</button>
+          <button id="btnUnselectAll" class="nrc-btn" type="button">表示中を全解除</button>
         </div>
       </div>
-    </div>
 
-    <div id="errBasic" class="nrc-error"></div>
-  </section>
-
-  <!-- ========== 検索対象フィールド ========== -->
-  <section class="nrc-card">
-    <div class="nrc-fieldListHead">
-      <div>
-        <div class="nrc-label" style="padding-top:0;">検索対象フィールド</div>
-        <div class="nrc-muted">チェックしたフィールドが検索対象になります（文字列は部分一致、選択肢は完全一致で検索します）。</div>
+      <div class="nrc-tableWrap">
+        <table class="nrc-table">
+          <thead>
+            <tr>
+              <th style="width:72px;">対象</th>
+              <th style="width:240px;">フィールド名</th>
+              <th style="width:220px;">フィールドコード</th>
+              <th style="width:160px;">タイプ</th>
+              <th style="width:120px;">一致方法</th>
+            </tr>
+          </thead>
+          <tbody id="fieldTbody">
+            <!-- config.js で行を描画する -->
+          </tbody>
+        </table>
       </div>
 
-      <div class="nrc-fieldListTools">
-        <input id="fieldFilter" class="nrc-input nrc-searchBox" type="text" aria-label="フィールド名またはフィールドコードで絞り込み" placeholder="フィールド名/コードで絞り込み">
-        <button id="btnSelectAll" class="nrc-btn" type="button">表示中を全選択</button>
-        <button id="btnUnselectAll" class="nrc-btn" type="button">表示中を全解除</button>
+      <div id="warnMissing" class="nrc-warnBox"></div>
+
+      <div class="nrc-note" style="margin-top:10px;">
+        <div style="font-weight:700; margin-bottom:6px;">運用メモ</div>
+        <ul style="margin:0; padding-left: 18px;">
+          <li>文字列（1行／複数行）・リッチエディター・リンクは <b>部分一致</b> で検索します。</li>
+          <li>添付ファイルは <b>ファイル名</b> を部分一致で検索します（ファイルの内容がヒットする場合もあります）。</li>
+          <li>ドロップダウン / ラジオボタン / チェックボックス / 複数選択は、入力した語が <b>選択肢と完全に一致</b> した場合だけ検索されます。</li>
+          <li>数値・日付・ユーザー選択などは対象外です（クイックフィルターをご利用ください）。</li>
+        </ul>
       </div>
+
+      <div id="errFields" class="nrc-error"></div>
     </div>
-
-    <div class="nrc-tableWrap">
-      <table class="nrc-table">
-        <thead>
-          <tr>
-            <th style="width:72px;">対象</th>
-            <th style="width:240px;">フィールド名</th>
-            <th style="width:220px;">フィールドコード</th>
-            <th style="width:160px;">タイプ</th>
-            <th style="width:120px;">一致方法</th>
-          </tr>
-        </thead>
-        <tbody id="fieldTbody">
-          <!-- config.js で行を描画する -->
-        </tbody>
-      </table>
-    </div>
-
-    <div id="warnMissing" class="nrc-warnBox"></div>
-
-    <div class="nrc-note" style="margin-top:10px;">
-      <div style="font-weight:700; margin-bottom:6px;">運用メモ</div>
-      <ul style="margin:0; padding-left: 18px;">
-        <li>文字列（1行／複数行）・リッチエディター・リンクは <b>部分一致</b> で検索します。</li>
-        <li>添付ファイルは <b>ファイル名</b> を部分一致で検索します（ファイルの内容がヒットする場合もあります）。</li>
-        <li>ドロップダウン / ラジオボタン / チェックボックス / 複数選択は、入力した語が <b>選択肢と完全に一致</b> した場合だけ検索されます。</li>
-        <li>数値・日付・ユーザー選択などは対象外です（kintone 標準の絞り込みをご利用ください）。</li>
-      </ul>
-    </div>
-
-    <div id="errFields" class="nrc-error"></div>
   </section>
+
+  <!-- ========== クイックフィルター ========== -->
+  <section class="nrc-card" id="secQf">
+    <div class="ls-secHead">
+      <label class="ls-switch"><input type="checkbox" id="qfEnabled"><span class="ls-secTitle">クイックフィルター</span></label>
+      <span class="nrc-muted">よく使うフィールドの絞り込み欄を一覧の上に並べます。</span>
+      <span class="ls-limit" id="qfLimit"></span>
+    </div>
+    <div id="qfBody" class="ls-secBody">
+      <div id="qfList" class="ls-list"></div>
+      <div class="ls-addRow">
+        <select id="qfAddField" class="nrc-select" aria-label="クイックフィルターに追加するフィールド"></select>
+        <button id="qfAdd" class="nrc-btn" type="button">＋ 追加</button>
+      </div>
+      <div class="nrc-muted" style="margin-top:6px;">文字列は部分一致、選択肢は選んだ値、数値・日付は範囲、ユーザー選択は「自分」で絞り込みます。</div>
+      <div id="errQf" class="nrc-error"></div>
+    </div>
+  </section>
+
+  <!-- ========== クイックボタン ========== -->
+  <section class="nrc-card" id="secQb">
+    <div class="ls-secHead">
+      <label class="ls-switch"><input type="checkbox" id="qbEnabled"><span class="ls-secTitle">クイックボタン</span></label>
+      <span class="nrc-muted">よく使う条件をボタンにします。押すと一覧がその条件で絞り込まれ、もう一度押すと解除されます。</span>
+      <span class="ls-limit" id="qbLimit"></span>
+    </div>
+    <div id="qbBody" class="ls-secBody">
+      <div id="qbList" class="ls-list"></div>
+      <div class="ls-addRow">
+        <button id="qbAdd" class="nrc-btn" type="button">＋ ボタンを追加</button>
+      </div>
+      <div id="errQb" class="nrc-error"></div>
+    </div>
+  </section>
+
+  <!-- ========== 集計 ========== -->
+  <section class="nrc-card" id="secSum">
+    <div class="ls-secHead">
+      <label class="ls-switch"><input type="checkbox" id="sumEnabled"><span class="ls-secTitle">集計</span></label>
+      <span class="nrc-muted">表示中の一覧の条件に一致する全レコードの件数と、数値の合計・平均を一覧の上に表示します。</span>
+      <span class="ls-limit" id="sumLimit"></span>
+    </div>
+    <div id="sumBody" class="ls-secBody">
+      <div class="nrc-muted" style="margin-bottom:8px;">件数は常に表示します。合計・平均は数値フィールドと、表示形式が数値の計算フィールドで使えます。</div>
+      <div id="sumList" class="ls-list"></div>
+      <div class="ls-addRow">
+        <select id="sumAddField" class="nrc-select" aria-label="集計するフィールド"></select>
+        <select id="sumAddMethod" class="nrc-select" aria-label="集計方法" style="min-width:auto;">
+          <option value="sum">合計</option>
+          <option value="avg">平均</option>
+        </select>
+        <button id="sumAdd" class="nrc-btn" type="button">＋ 追加</button>
+      </div>
+      <div id="errSum" class="nrc-error"></div>
+    </div>
+  </section>
+
+  <!-- ========== 条件付き装飾 ========== -->
+  <section class="nrc-card" id="secHl">
+    <div class="ls-secHead">
+      <label class="ls-switch"><input type="checkbox" id="hlEnabled"><span class="ls-secTitle">条件付き装飾</span></label>
+      <span class="nrc-muted">条件に一致するレコードの行、またはセルに色を付けます（表形式の一覧）。</span>
+      <span class="ls-limit" id="hlLimit"></span>
+    </div>
+    <div id="hlBody" class="ls-secBody">
+      <div id="hlList" class="ls-list"></div>
+      <div class="ls-addRow">
+        <button id="hlAdd" class="nrc-btn" type="button">＋ ルールを追加</button>
+      </div>
+      <div class="nrc-muted" style="margin-top:6px;">行のルールは上にあるものが優先されます。セルのルールは行の色より優先されます。</div>
+      <div id="errHl" class="nrc-error"></div>
+    </div>
+  </section>
+
+  <div id="errAll" class="nrc-error"></div>
 
   <!-- ========== 保存ボタン ========== -->
   <div class="nrc-actions">

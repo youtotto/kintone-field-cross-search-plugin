@@ -1,5 +1,15 @@
 /* desktop.js
- * 一覧画面ヘッダーに横断検索バーを表示する。
+ * 一覧サポート（旧: アプリ内横断検索）の一覧画面。
+ * - 横断検索: 一覧画面ヘッダーのメニュー領域に検索バーを表示（v1 と同じ UI・同じ URL パラメーター）
+ * - クイックフィルター / クイックボタン / 集計: 一覧の上（ヘッダー領域）に表示
+ * - 条件付き装飾: 表形式の一覧の行・セルを公式 API（setRecordListStyle）で装飾
+ * 検索条件は ls-core.js の readUrlState / buildNavUrl で一元管理し、標準の絞り込み（base）に
+ * プラグインの条件（横断検索・クイックフィルター・クイックボタン）を AND で足して query に入れる。
+ * 集計は kintone が実際に適用している条件（getQueryCondition）を使うので、表示中のレコードと必ず一致する。
+ * getQueryCondition で条件を取得できないときは、標準の絞り込みを落とした query で開き直したり、絞り込みの無い範囲を
+ * 集計したりしないよう、条件の変更と集計を中止して案内を出す。
+ *
+ * 横断検索の注意（v1 から）:
  * - 検索対象は設定時のスナップショット（fieldSnapshotJson）を正とし、現在のフィールド定義と
  *   食い違うものは検索対象から除外する（全滅時は設定値でフォールバック）
  * - app.record.index.show は同一ページ内で複数回発火しうるため、DOM 生成とイベント登録を
@@ -9,6 +19,7 @@
   'use strict';
 
   const PLUGIN_ID = kintone.$PLUGIN_ID;
+  const LS = window.NrcListSupport;
 
   // 検索語の上限（設定値が無い・不正な場合の既定値）。config.js / config.html と同じ値にすること
   const DEFAULT_MAX_TOKENS = 5;
@@ -26,67 +37,123 @@
     fallback: false,          // 使えるフィールドが 0 件のため設定値でフォールバック中
     optionsMap: {},
     validation: null,         // 現在のフィールド定義との照合（ページ内で 1 回だけ実行）
-    lastRecords: null
+    fieldMap: null,           // 現在のフィールド定義（code -> {type, options, ...}）。取得失敗時は null
+    lastRecords: null,
+    summaryCache: null,       // { key, result } 同じ条件なら再取得しない（ページ送り・並べ替え）
+    summarySeq: 0,
+    pending: []               // 非同期処理（テストで完了を待つため）
   };
 
   // =========================
   // 設定の読み取り
   // =========================
-  function parseJsonArray(str) {
-    try {
-      const v = str ? JSON.parse(str) : [];
-      return Array.isArray(v) ? v : [];
-    } catch (e) {
-      return [];
-    }
-  }
-
   function getPluginConfig() {
-    const cfg = kintone.plugin.app.getConfig(PLUGIN_ID) || {};
-    const maxTokens = Number(cfg.maxTokens);
-
+    const ls = LS.normalizeConfig(kintone.plugin.app.getConfig(PLUGIN_ID) || {});
     return {
-      spaceJoin: (cfg.spaceJoin === 'or') ? 'or' : 'and', // 一覧画面を開いたときの AND / OR の初期値
-      maxTokens: (Number.isFinite(maxTokens) && maxTokens >= 1 && maxTokens <= 10) ? maxTokens : DEFAULT_MAX_TOKENS,
-      targets: parseJsonArray(cfg.targetsJson),             // [{code, op}]
-      fieldSnapshot: parseJsonArray(cfg.fieldSnapshotJson)  // [{code,label,type,op,isSubtable,parent...,options}]
+      ls,
+      spaceJoin: ls.search.spaceJoin,       // 一覧画面を開いたときの AND / OR の初期値
+      maxTokens: ls.search.maxTokens || DEFAULT_MAX_TOKENS,
+      targets: ls.search.targets,           // [{code, op}]
+      fieldSnapshot: ls.search.fieldSnapshot // [{code,label,type,op,isSubtable,parent...,options}]
     };
   }
 
+  const searchEnabled = () => Boolean(state.config && state.config.ls.search.enabled && state.config.targets.length > 0);
+
   // =========================
-  // URL操作：検索語保持用（nrc_q）
+  // URL（検索条件の一元管理）
   // =========================
+  function urlState() {
+    return LS.readUrlState(location.search);
+  }
+
   function getRawKeywordFromUrl() {
-    const params = new URLSearchParams(location.search);
-    return params.get('nrc_q') || '';
+    return urlState().active.kw;
   }
 
   // URL に保持された検索モード。不正な値・未指定は null（呼び出し側で設定値へフォールバック）
   function getModeFromUrl() {
-    const v = new URLSearchParams(location.search).get('nrc_mode');
-    return (v === 'and' || v === 'or') ? v : null;
+    return urlState().mode;
   }
 
   function resolveInitialMode(config) {
     return getModeFromUrl() || (config.spaceJoin === 'or' ? 'or' : 'and');
   }
 
+  function keywordQueryFor(kw) {
+    if (!kw || !kw.trim() || !searchEnabled()) return '';
+    return analyzeSearch(kw, state.searchTargets, state.mode, state.config.maxTokens, state.optionsMap).query;
+  }
+
+  function quickFilterQueryFor(values) {
+    const qf = state.config && state.config.ls.quickFilter;
+    if (!qf || !qf.enabled) return '';
+    return LS.buildQuickFilterQuery(usableQuickFilterItems(), values, runtimeMetaMap(qf.items)).query;
+  }
+
+  function buttonQueryFor(id) {
+    const qb = state.config && state.config.ls.quickButtons;
+    if (!id || !qb || !qb.enabled) return '';
+    const button = qb.items.find((b) => b.id === id);
+    if (!button) return '';
+    const r = LS.buildButtonQuery(button, runtimeMetaMap(button.metas));
+    // 条件の一部しか作れないボタンは適用しない（「期限超過」が「未完了すべて」になるのを防ぐ）
+    return r.invalid > 0 ? '' : r.query;
+  }
+
+  /**
+   * kintone が実際に適用している条件（一覧自体の条件・標準の絞り込み・URL の query を含む。フィールドコード）。
+   * 標準の絞り込みは URL の q に内部のフィールド ID で入っていて読めないため、getQueryCondition で読む。
+   * 空文字列（絞り込みなし）と、取得できない（例外・null・API なし）は ls-core の readCondition で分ける。
+   */
+  function currentCondition() {
+    const available = typeof kintone.app.getQueryCondition === 'function';
+    return LS.readCondition(available ? () => kintone.app.getQueryCondition() : null);
+  }
+
+  // 条件を取得できないときの対処。理由（例外・null・API なし）によらず同じ文にし、原因は断定しない
+  const CONDITION_REMEDY = '画面を再読み込みしてから、もう一度お試しください。解消しない場合は、標準の絞り込み条件を確認するか、アプリ管理者にお問い合わせください。';
+  const CONDITION_ERROR = `一覧の絞り込み条件を取得できませんでした。${CONDITION_REMEDY}`;
+  const SUMMARY_CONDITION_ERROR = `現在の絞り込み条件を読み取れないため、集計できません。${CONDITION_REMEDY}`;
+
+  /**
+   * いま適用されている条件（base）にプラグインの条件を足して一覧を開き直す。
+   * changes: { kw, kwQuery, qf, btn, mode } のうち変えるものだけ
+   * base の決め方:
+   * - プラグインの条件が有効（owned）: 最初に条件を足したときに記録した base（nrc_base）を使う。いまの条件には
+   *   プラグインの条件が含まれるため取り直さない。q・一覧・query が変わっていないことは署名で確かめてある
+   * - 有効でない状態から条件を足す: getQueryCondition で取り直す。取得できないときは、標準の絞り込みを落とした
+   *   query で開き直さないよう、URL を変えずに中止する
+   * - 開き直した結果プラグインの条件が無い（解除など）: base は使わない（元の query に戻すだけ）
+   * @returns {{ok:true} | {ok:false, reason:string}} ok:false のときは URL も画面の適用状態も変えていない
+   */
+  function navigateWith(changes) {
+    const u = urlState();
+    const next = { kw: u.active.kw, qf: u.active.qf, btn: u.active.btn, mode: state.mode, ...changes };
+    const parts = [
+      changes.kwQuery !== undefined ? changes.kwQuery : keywordQueryFor(next.kw),
+      quickFilterQueryFor(next.qf),
+      buttonQueryFor(next.btn)
+    ];
+    let base = '';
+    if (u.owned) {
+      base = u.base;
+    } else if (parts.some((p) => (p || '').trim())) {
+      const c = currentCondition();
+      if (!c.ok) return { ok: false, reason: c.reason };
+      base = c.condition;
+    }
+    const orig = u.owned ? u.orig : u.query;
+    const final = LS.composeQuery([base, ...parts]);
+    location.href = LS.buildNavUrl(location.href, { base, orig, final, kw: next.kw, mode: next.mode, qf: next.qf, btn: next.btn });
+    return { ok: true };
+  }
+
+  const RESET_NOTICE = '標準の絞り込み（または一覧）が変わったため、一覧サポートの条件を解除して表示し直しました。';
+
   function setQueryAndKeywordAndReload(newQuery, rawKeyword, mode) {
-    const url = new URL(location.href);
-    const params = url.searchParams;
-
     // 検索モードは検索・解除のどちらでも保持する（解除しても利用者の選択を戻さない）
-    params.set('nrc_mode', mode === 'or' ? 'or' : 'and');
-
-    if (newQuery && newQuery.trim()) params.set('query', newQuery);
-    else params.delete('query');
-
-    if (rawKeyword && rawKeyword.trim()) params.set('nrc_q', rawKeyword);
-    else params.delete('nrc_q');
-
-    params.delete('offset');
-    url.search = params.toString();
-    location.href = url.toString();
+    return navigateWith({ kw: rawKeyword || '', kwQuery: newQuery || '', mode: mode === 'or' ? 'or' : 'and' });
   }
 
   // =========================
@@ -95,7 +162,7 @@
   function splitTokens(rawText) {
     const text = (rawText ?? '')
       .toString()
-      .replace(/\u3000/g, ' ')
+      .replace(/　/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
 
@@ -104,12 +171,7 @@
   }
 
   function escapeQueryValue(value) {
-    return (value ?? '')
-      .toString()
-      .replace(/\\/g, '\\\\')
-      .replace(/"/g, '\\"')
-      .replace(/\r?\n/g, ' ')
-      .trim();
+    return LS.escapeQueryValue(value);
   }
 
   function escapeHtml(s) {
@@ -268,6 +330,7 @@
       }
       .nrc-xsearch__statusMain { font-weight: 700; }
       .nrc-xsearch__statusNote { color: #92400e; }
+      .nrc-xsearch__statusError { color: #991b1b; }
 
       .nrc-xsearch__panel {
         position: absolute;
@@ -315,6 +378,40 @@
       .nrc-xsearch__chip.is-excluded { color: #6b7280; background: #f3f4f6; }
       .nrc-xsearch__chip.is-excluded .nrc-xsearch__chipLabel { text-decoration: line-through; }
       .nrc-xsearch__chipTag { margin-left: 4px; font-size: 11px; font-weight: 700; color: #92400e; }
+
+      /* ===== 一覧サポート（ヘッダー領域） ===== */
+      #nrc-ls-root [hidden] { display: none !important; }
+      .nrc-ls { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 10px; font-size: 13px; color: #1f2937; }
+      .nrc-ls__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+      .nrc-ls__item { display: inline-flex; align-items: center; gap: 6px; }
+      .nrc-ls__label { font-size: 12px; font-weight: 700; color: #4b5563; white-space: nowrap; }
+      .nrc-ls__input, .nrc-ls__select {
+        box-sizing: border-box; padding: 5px 8px; border: 1px solid #d7d7d7; border-radius: 8px;
+        font-size: 13px; background: #fff; color: #111; max-width: 220px;
+      }
+      .nrc-ls__input[type="number"] { width: 96px; }
+      .nrc-ls__input[type="date"] { width: 140px; }
+      .nrc-ls__tilde { color: #6b7280; }
+      .nrc-ls__btn {
+        appearance: none; border: 1px solid #d7d7d7; background: #fff; border-radius: 10px;
+        padding: 6px 10px; cursor: pointer; font-size: 13px; line-height: 1; color: #111;
+      }
+      .nrc-ls__btn--primary { background: #1f2937; border-color: #1f2937; color: #fff; font-weight: 700; }
+      .nrc-ls__chip {
+        appearance: none; border: 1px solid #cfd4dc; background: #fff; border-radius: 999px;
+        padding: 5px 12px; cursor: pointer; font-size: 13px; line-height: 1.2; color: #1f2937;
+      }
+      .nrc-ls__chip[aria-pressed="true"] { background: #1f2937; border-color: #1f2937; color: #fff; font-weight: 700; }
+      .nrc-ls__note { font-size: 12px; color: #92400e; }
+      .nrc-ls__sum { gap: 6px 10px; padding: 6px 10px; border: 1px solid #e5e7eb; border-radius: 10px; background: #f9fafb; }
+      .nrc-ls__count { font-weight: 700; }
+      .nrc-ls__sep { color: #9ca3af; }
+      .nrc-ls__metric b { font-variant-numeric: tabular-nums; }
+      .nrc-ls__muted { color: #6b7280; font-size: 12px; }
+      .nrc-ls__error { color: #991b1b; font-size: 12px; }
+      .nrc-ls__input:focus-visible, .nrc-ls__select:focus-visible, .nrc-ls__btn:focus-visible, .nrc-ls__chip:focus-visible {
+        outline: 2px solid #1d6fdc; outline-offset: 1px;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -413,13 +510,19 @@
       return;
     }
 
-    setQueryAndKeywordAndReload(a.query, text, state.mode);
+    const r = setQueryAndKeywordAndReload(a.query, text, state.mode);
+    if (!r.ok) renderStatus({ conditionError: r });
   }
 
   function clearSearch() {
     const input = document.getElementById('nrc-xsearch-input');
+    const typed = input ? input.value : '';
     if (input) input.value = '';
-    setQueryAndKeywordAndReload('', '', state.mode);
+    const r = setQueryAndKeywordAndReload('', '', state.mode);
+    if (!r.ok) {
+      if (input) input.value = typed;
+      renderStatus({ conditionError: r });
+    }
   }
 
   function renderMode() {
@@ -438,6 +541,7 @@
   function setMode(mode) {
     const next = (mode === 'or') ? 'or' : 'and';
     if (next === state.mode) return;
+    const prev = state.mode;
     state.mode = next;
     renderMode();
 
@@ -445,7 +549,14 @@
     if (!applied.trim() || !state.config) return;
 
     const a = analyzeSearch(applied, state.searchTargets, state.mode, state.config.maxTokens, state.optionsMap);
-    if (a.query) setQueryAndKeywordAndReload(a.query, applied, state.mode);
+    if (!a.query) return;
+    const r = setQueryAndKeywordAndReload(a.query, applied, state.mode);
+    if (!r.ok) {
+      // 開き直せなかった: 適用中の検索のモードとトグルの表示を一致させるため元に戻す
+      state.mode = prev;
+      renderMode();
+      renderStatus({ conditionError: r });
+    }
   }
 
   function bindRootEvents(root) {
@@ -496,6 +607,8 @@
   /**
    * 検索適用中の表示・通知を更新する。
    * opts.pendingAnalysis: 再読込せずにその場で通知だけ出す場合（条件を 1 つも作れなかったとき）
+   * opts.conditionError : 一覧の絞り込み条件を取得できずに中止したとき（navigateWith の戻り値）。
+   *                       適用中の表示（検索中・クリア）は URL のまま変えず、案内だけを出す
    */
   function renderStatus(opts) {
     const box = document.getElementById('nrc-xsearch-status');
@@ -506,6 +619,12 @@
     const applied = Boolean(raw.trim());
     if (btnClear) btnClear.hidden = !applied;
 
+    if (opts && opts.conditionError) {
+      box.innerHTML = `<div class="nrc-xsearch__statusError">${escapeHtml(CONDITION_ERROR)}</div>`;
+      box.hidden = false;
+      return;
+    }
+
     const pending = opts && opts.pendingAnalysis;
     const lines = [];
 
@@ -514,6 +633,12 @@
       : null);
 
     if (!a) {
+      // 標準の絞り込みを変えたためにプラグインの条件を外して開き直したときは、その旨だけを出す
+      if (urlState().resetNotice) {
+        box.innerHTML = `<div class="nrc-xsearch__statusNote">${escapeHtml(RESET_NOTICE)}</div>`;
+        box.hidden = false;
+        return;
+      }
       box.hidden = true;
       box.innerHTML = '';
       return;
@@ -638,17 +763,28 @@
     return map;
   }
 
+  function sortedOptions(f) {
+    const opt = f && f.options && typeof f.options === 'object' ? f.options : {};
+    return Object.keys(opt)
+      .filter(k => k !== '__proto__')
+      .sort((a, b) => Number((opt[a] && opt[a].index) || 0) - Number((opt[b] && opt[b].index) || 0));
+  }
+
   async function fetchCurrentFieldMap() {
     const props = await kintone.app.getFormFields();
 
-    const map = {}; // code -> {type, options[]}
-    const put = (f) => {
+    const map = {}; // code -> {type, options[], label, ...}
+    const put = (f, parent) => {
       if (!f || !f.code) return;
       const type = f.type || 'UNKNOWN';
-      const options = IN_TYPES.has(type)
-        ? Object.keys(f.options || {}).filter(k => k !== '__proto__')
-        : [];
-      map[f.code] = { type, options };
+      map[f.code] = {
+        code: f.code,
+        type,
+        label: f.label || f.code,
+        options: (IN_TYPES.has(type)) ? sortedOptions(f) : [],
+        unit: f.unit, unitPosition: f.unitPosition, displayScale: f.displayScale, format: f.format,
+        inSubtable: Boolean(parent)
+      };
     };
 
     Object.keys(props || {}).forEach((code) => {
@@ -656,10 +792,11 @@
       if (!f) return;
       if (f.type === 'SUBTABLE') {
         const sub = f.fields || {};
-        Object.keys(sub).forEach((subCode) => put(sub[subCode]));
+        Object.keys(sub).forEach((subCode) => put(sub[subCode], f));
+        map[f.code || code] = { code: f.code || code, type: 'SUBTABLE', label: f.label, options: [] };
         return;
       }
-      put(f);
+      put(f, null);
     });
 
     return map;
@@ -702,6 +839,7 @@
   async function runValidation(config) {
     try {
       const currentMap = await fetchCurrentFieldMap();
+      state.fieldMap = currentMap;
       const v = validateTargetsBySnapshot(config, currentMap);
 
       state.mismatch = v.excludedCodes.length > 0;
@@ -718,6 +856,7 @@
       }
     } catch (e) {
       // 取得や比較に失敗しても検索不能にしない
+      state.fieldMap = null;
       state.mismatch = false;
       state.fallback = false;
       state.excludedCodes = new Set();
@@ -726,11 +865,446 @@
   }
 
   // =========================
+  // 一覧サポート: フィールド情報
+  // =========================
+  /**
+   * 設定時のスナップショットと現在の定義を合わせる。
+   * 現在の定義が取れたときは、フィールドが無い・型が変わったものを使わない（null）。
+   */
+  function runtimeMeta(snapshot) {
+    if (!snapshot || !snapshot.code) return null;
+    if (!state.fieldMap) return snapshot;
+    const cur = state.fieldMap[snapshot.code];
+    if (!cur || cur.inSubtable) return null;
+    if (snapshot.type && cur.type !== snapshot.type) return null;
+    const merged = { ...snapshot, ...cur };
+    // ステータスの選択肢は getFormFields に無いので設定時の値を使う
+    if ((!cur.options || cur.options.length === 0) && Array.isArray(snapshot.options)) merged.options = snapshot.options;
+    return merged;
+  }
+
+  function runtimeMetaMap(list) {
+    const map = {};
+    (list || []).forEach((m) => {
+      const r = runtimeMeta(m);
+      if (r) map[m.code] = r;
+    });
+    return map;
+  }
+
+  function usableQuickFilterItems() {
+    const qf = state.config.ls.quickFilter;
+    return qf.items.map((i) => runtimeMeta(i)).filter(Boolean);
+  }
+
+  // =========================
+  // 一覧サポート: ヘッダー領域のパネル
+  // =========================
+  function el(tag, attrs, children) {
+    const node = document.createElement(tag);
+    Object.entries(attrs || {}).forEach(([k, v]) => {
+      if (v === null || v === undefined || v === false) return;
+      if (k === 'text') node.textContent = v;
+      else if (k === 'className') node.className = v;
+      else node.setAttribute(k, v === true ? '' : String(v));
+    });
+    (children || []).forEach((c) => { if (c !== null && c !== undefined) node.append(c); });
+    return node;
+  }
+
+  function track(promise) {
+    state.pending.push(promise);
+    return promise;
+  }
+
+  /** パネルを用意する。URL（条件）が変わったら作り直す */
+  function ensurePanel() {
+    const host = kintone.app.getHeaderSpaceElement ? kintone.app.getHeaderSpaceElement() : null;
+    if (!host) return null;
+    let root = document.getElementById('nrc-ls-root');
+    if (root && host.contains(root) && root.dataset.url === location.search) return root;
+    if (root) root.remove();
+    root = el('div', { id: 'nrc-ls-root', className: 'nrc-ls' });
+    root.dataset.url = location.search;
+    host.appendChild(root);
+    buildPanel(root);
+    return root;
+  }
+
+  function buildPanel(root) {
+    const ls = state.config.ls;
+    const u = urlState();
+
+    if (u.resetNotice && !searchEnabled()) {
+      root.append(el('div', { className: 'nrc-ls__row nrc-ls__note', id: 'nrc-ls-notice', role: 'status', text: RESET_NOTICE }));
+    }
+
+    if (ls.quickFilter.enabled) {
+      const items = usableQuickFilterItems();
+      if (items.length) root.append(buildQuickFilterRow(items, u.active.qf));
+    }
+    if (ls.quickButtons.enabled && ls.quickButtons.items.length) {
+      root.append(buildQuickButtonsRow(ls.quickButtons.items, u.active.btn));
+    }
+    if (ls.summary.enabled) {
+      root.append(el('div', { className: 'nrc-ls__row nrc-ls__sum', id: 'nrc-ls-summary', role: 'status', 'aria-live': 'polite' }));
+    }
+    bindPanelEvents(root);
+  }
+
+  // ---------- クイックフィルター ----------
+  function buildQuickFilterRow(items, values) {
+    const row = el('div', { className: 'nrc-ls__row nrc-ls__qf', id: 'nrc-ls-qf', role: 'search', 'aria-label': 'クイックフィルター' });
+    items.forEach((meta) => {
+      const g = LS.typeGroup(meta.type);
+      const v = values[meta.code];
+      const wrap = el('span', { className: 'nrc-ls__item', 'data-code': meta.code, 'data-group': g });
+      const label = el('span', { className: 'nrc-ls__label', text: meta.label || meta.code });
+      wrap.append(label);
+      const aria = meta.label || meta.code;
+      if (g === 'text') {
+        wrap.append(el('input', { className: 'nrc-ls__input', type: 'text', 'data-part': 'value', 'aria-label': `${aria}（含む）`, placeholder: 'を含む', value: typeof v === 'string' ? v : '' }));
+      } else if (g === 'select' || g === 'multi') {
+        const sel = el('select', { className: 'nrc-ls__select', 'data-part': 'value', 'aria-label': aria });
+        sel.append(el('option', { value: '', text: 'すべて' }));
+        (meta.options || []).forEach((o) => sel.append(el('option', { value: o, text: o })));
+        sel.value = typeof v === 'string' ? v : '';
+        wrap.append(sel);
+      } else if (g === 'number') {
+        wrap.append(
+          el('input', { className: 'nrc-ls__input', type: 'number', 'data-part': 'from', 'aria-label': `${aria}（下限）`, placeholder: '下限', value: v && v.from !== undefined ? v.from : '' }),
+          el('span', { className: 'nrc-ls__tilde', text: '〜' }),
+          el('input', { className: 'nrc-ls__input', type: 'number', 'data-part': 'to', 'aria-label': `${aria}（上限）`, placeholder: '上限', value: v && v.to !== undefined ? v.to : '' })
+        );
+      } else if (g === 'date' || g === 'datetime') {
+        wrap.append(
+          el('input', { className: 'nrc-ls__input', type: 'date', 'data-part': 'from', 'aria-label': `${aria}（開始）`, value: v && v.from ? v.from : '' }),
+          el('span', { className: 'nrc-ls__tilde', text: '〜' }),
+          el('input', { className: 'nrc-ls__input', type: 'date', 'data-part': 'to', 'aria-label': `${aria}（終了）`, value: v && v.to ? v.to : '' })
+        );
+      } else if (g === 'user') {
+        const sel = el('select', { className: 'nrc-ls__select', 'data-part': 'value', 'aria-label': aria });
+        sel.append(el('option', { value: '', text: 'すべて' }), el('option', { value: 'me', text: '自分' }));
+        sel.value = v === 'me' ? 'me' : '';
+        wrap.append(sel);
+      } else {
+        return;
+      }
+      row.append(wrap);
+    });
+    const active = Object.keys(values || {}).length > 0;
+    row.append(
+      el('button', { className: 'nrc-ls__btn nrc-ls__btn--primary', type: 'button', 'data-act': 'qf-apply', text: '絞り込む' }),
+      el('button', { className: 'nrc-ls__btn', type: 'button', 'data-act': 'qf-clear', text: '解除', hidden: !active }),
+      el('span', { className: 'nrc-ls__note', 'data-part': 'qf-note', role: 'status' })
+    );
+    return row;
+  }
+
+  function readQuickFilterValues(row) {
+    const values = {};
+    row.querySelectorAll('.nrc-ls__item[data-code]').forEach((wrap) => {
+      const code = wrap.dataset.code;
+      const g = wrap.dataset.group;
+      const part = (p) => wrap.querySelector(`[data-part="${p}"]`);
+      if (g === 'number' || g === 'date' || g === 'datetime') {
+        const from = part('from') ? part('from').value.trim() : '';
+        const to = part('to') ? part('to').value.trim() : '';
+        if (from || to) values[code] = { ...(from ? { from } : {}), ...(to ? { to } : {}) };
+      } else {
+        const v = part('value') ? part('value').value.trim() : '';
+        if (v) values[code] = v;
+      }
+    });
+    return values;
+  }
+
+  function applyQuickFilter(row) {
+    const values = LS.cleanQuickFilterValues(readQuickFilterValues(row));
+    const items = usableQuickFilterItems();
+    const r = LS.buildQuickFilterQuery(items, values, runtimeMetaMap(state.config.ls.quickFilter.items));
+    const note = row.querySelector('[data-part="qf-note"]');
+    if (note) {
+      note.textContent = '';
+      note.classList.remove('nrc-ls__error');
+    }
+    if (r.problems.length) {
+      const labels = r.problems.map((c) => (items.find((i) => i.code === c) || {}).label || c);
+      if (note) note.textContent = `入力を確認してください：${labels.join('、')}`;
+      return;
+    }
+    showRowError(row, 'qf-note', navigateWith({ qf: values }));
+  }
+
+  /** 条件を取得できずに中止したときは、操作した行に案内を出す（押した状態・「解除」の表示は URL のまま変えない） */
+  function showRowError(row, part, result) {
+    if (result.ok || !row) return;
+    const note = row.querySelector(`[data-part="${part}"]`);
+    if (!note) return;
+    note.textContent = CONDITION_ERROR;
+    note.classList.add('nrc-ls__error');
+  }
+
+  // ---------- クイックボタン ----------
+  function buildQuickButtonsRow(buttons, activeId) {
+    const row = el('div', { className: 'nrc-ls__row nrc-ls__qb', id: 'nrc-ls-qb', role: 'group', 'aria-label': 'クイックボタン' });
+    buttons.forEach((b) => {
+      const built = LS.buildButtonQuery(b, runtimeMetaMap(b.metas));
+      const usable = Boolean(built.query) && built.invalid === 0;
+      row.append(el('button', {
+        className: 'nrc-ls__chip', type: 'button', 'data-act': 'qb', 'data-id': b.id,
+        'aria-pressed': activeId === b.id ? 'true' : 'false',
+        disabled: !usable,
+        title: usable ? '' : '条件のフィールドが変更されたため使えません。管理者にプラグイン設定の見直しを依頼してください。',
+        text: b.label || '（名前なし）'
+      }));
+    });
+    row.append(el('span', { className: 'nrc-ls__note', 'data-part': 'qb-note', role: 'status' }));
+    return row;
+  }
+
+  function bindPanelEvents(root) {
+    root.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-act]');
+      if (!btn || !root.contains(btn)) return;
+      const act = btn.dataset.act;
+      if (act === 'qf-apply') applyQuickFilter(btn.closest('.nrc-ls__qf'));
+      else if (act === 'qf-clear') showRowError(btn.closest('.nrc-ls__qf'), 'qf-note', navigateWith({ qf: {} }));
+      else if (act === 'qb') {
+        const active = urlState().active.btn;
+        showRowError(btn.closest('.nrc-ls__qb'), 'qb-note', navigateWith({ btn: active === btn.dataset.id ? '' : btn.dataset.id }));
+      }
+    });
+    root.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || !e.target.closest('.nrc-ls__qf') || e.target.tagName === 'BUTTON') return;
+      // 日本語入力の変換確定 Enter では絞り込まない
+      if (e.isComposing || e.keyCode === 229) return;
+      e.preventDefault();
+      applyQuickFilter(e.target.closest('.nrc-ls__qf'));
+    });
+  }
+
+  // ---------- 集計 ----------
+  function summaryItems() {
+    const out = [];
+    const notes = [];
+    state.config.ls.summary.items.forEach((i) => {
+      const meta = runtimeMeta(i);
+      if (!meta || !LS.isNumericField(meta)) { notes.push(i.label || i.code); return; }
+      out.push({ ...meta, method: i.method, label: i.label || meta.label || meta.code });
+    });
+    return { items: out, notes };
+  }
+
+  function renderSummaryText(row, parts) {
+    row.replaceChildren(...parts);
+  }
+
+  function formatCount(n) {
+    return `${LS.formatNumberDisplay(String(n), {})}件`;
+  }
+
+  function renderSummary(row, result, items, notes) {
+    const parts = [el('span', { className: 'nrc-ls__count', text: formatCount(result.total) })];
+    if (result.overLimit) {
+      parts.push(el('span', { className: 'nrc-ls__muted', text: `（${LS.formatNumberDisplay(String(LS.SUMMARY_MAX_RECORDS), {})}件を超えるため、合計・平均は表示しません。条件を絞り込んでください）` }));
+    } else {
+      items.forEach((item) => {
+        const acc = result.acc[item.code];
+        if (!acc) return;
+        const dec = LS.displayDecimals(item, acc);
+        const value = item.method === 'avg' ? LS.averageString(acc, dec) : LS.sumString(acc, dec);
+        parts.push(el('span', { className: 'nrc-ls__sep', text: '｜', 'aria-hidden': 'true' }));
+        const metric = el('span', { className: 'nrc-ls__metric' });
+        metric.append(`${item.label} ${LS.METHOD_LABELS[item.method]} `, el('b', { text: value === null ? '―' : LS.formatNumberDisplay(value, item) }));
+        const extra = [];
+        if (item.method === 'avg' && acc.empty) extra.push(`空欄${acc.empty}件を除く`);
+        if (acc.invalid) extra.push(`数値でない値${acc.invalid}件を除く`);
+        if (extra.length) metric.append(el('span', { className: 'nrc-ls__muted', text: `（${extra.join('・')}）` }));
+        parts.push(metric);
+      });
+    }
+    if (notes && notes.length) {
+      parts.push(el('span', { className: 'nrc-ls__muted', text: `（集計できないフィールド：${notes.join('、')}）` }));
+    }
+    renderSummaryText(row, parts);
+  }
+
+  function errorMessage(e) {
+    if (!e) return '不明なエラー';
+    if (typeof e === 'string') return e;
+    return e.message || e.code || String(e);
+  }
+
+  async function updateSummary() {
+    const row = document.getElementById('nrc-ls-summary');
+    if (!row) return;
+    const seq = ++state.summarySeq;
+
+    const c = currentCondition();
+    if (!c.ok) {
+      // 取得できない条件で集計すると、絞り込みの無い広い範囲を集計してしまう。0 件や集計結果としては出さない
+      renderSummaryText(row, [el('span', { className: 'nrc-ls__error', text: SUMMARY_CONDITION_ERROR })]);
+      return;
+    }
+    const condition = c.condition;
+
+    const { items, notes } = summaryItems();
+    const key = JSON.stringify([condition, items.map((i) => `${i.code}:${i.method}`)]);
+    if (state.summaryCache && state.summaryCache.key === key) {
+      renderSummary(row, state.summaryCache.result, items, notes);
+      return;
+    }
+
+    renderSummaryText(row, [el('span', { className: 'nrc-ls__muted', text: '集計中…' })]);
+    try {
+      const result = await LS.fetchSummary({
+        getRecords: (params) => kintone.api(kintone.api.url('/k/v1/records.json', true), 'GET', { app: kintone.app.getId(), ...params }),
+        condition,
+        items,
+        onProgress: (fetched, total) => {
+          if (seq !== state.summarySeq) return;
+          renderSummaryText(row, [el('span', { className: 'nrc-ls__muted', text: `集計中…（${LS.formatNumberDisplay(String(fetched), {})} / ${LS.formatNumberDisplay(String(total), {})}件）` })]);
+        }
+      });
+      if (seq !== state.summarySeq) return; // より新しい条件の集計が始まっている
+      state.summaryCache = { key, result };
+      renderSummary(row, result, items, notes);
+    } catch (e) {
+      if (seq !== state.summarySeq) return;
+      renderSummaryText(row, [el('span', { className: 'nrc-ls__error', text: `集計できませんでした（${errorMessage(e)}）。` })]);
+    }
+  }
+
+  // ---------- 条件付き装飾 ----------
+  // setRecordListStyle で装飾できない型（公式ドキュメントの制限）
+  const UNSTYLABLE_TYPES = new Set(['SUBTABLE', 'REFERENCE_TABLE', 'GROUP', 'LABEL', 'SPACER', 'HR']);
+
+  function presetToStyle(name, type) {
+    const p = LS.STYLE_PRESETS[name];
+    if (!p) return null;
+    const style = {};
+    if (p.background) style.background = { backgroundColor: p.background };
+    if ((p.color || p.bold) && type !== 'RICH_TEXT') {
+      style.content = {};
+      if (p.color) style.content.color = p.color;
+      if (p.bold) style.content.fontWeight = 'bold';
+    }
+    return Object.keys(style).length ? style : null;
+  }
+
+  async function listColumns(records) {
+    let fields = null;
+    try {
+      if (typeof kintone.app.getView === 'function') {
+        const v = await kintone.app.getView();
+        if (v && Array.isArray(v.fields)) fields = v.fields.slice();
+      }
+    } catch (e) {
+      fields = null;
+    }
+    if (!fields) fields = Object.keys((records && records[0]) || {});
+    return fields.filter((code) => {
+      const m = state.fieldMap ? state.fieldMap[code] : null;
+      if (state.fieldMap && !m) return code === '$id' ? false : !code.startsWith('$');
+      return !(m && (m.inSubtable || UNSTYLABLE_TYPES.has(m.type)));
+    });
+  }
+
+  async function applyHighlight(event) {
+    const rules = state.config.ls.highlight.rules;
+    const records = (event && event.records) || [];
+    const metaMap = {};
+    rules.forEach((r) => {
+      const m = runtimeMeta({ code: r.code, type: r.type });
+      if (m) metaMap[r.code] = m;
+    });
+    const me = typeof kintone.getLoginUser === 'function' ? kintone.getLoginUser() : null;
+    const results = LS.evaluateHighlights(rules, records, metaMap, { now: new Date(), loginUserCode: me && me.code });
+    const columns = await listColumns(records);
+
+    if (typeof kintone.app.setRecordListStyle === 'function') {
+      const body = results.map((r) => {
+        const style = [];
+        columns.forEach((code) => {
+          const type = state.fieldMap && state.fieldMap[code] ? state.fieldMap[code].type : '';
+          const s = presetToStyle(r.cells[code] || r.row, type);
+          if (s) style.push({ columnType: 'FIELD', column: code, ...s });
+        });
+        if (r.row) {
+          const s = presetToStyle(r.row, '');
+          if (s && s.background) {
+            style.push({ columnType: 'ACTION', column: 'OPEN_DETAIL', background: s.background });
+            style.push({ columnType: 'ACTION', column: 'RECORD_ACTIONS', background: s.background });
+          }
+        }
+        return { recordId: r.recordId, style };
+      }).filter((b) => b.style.length > 0);
+      try {
+        await kintone.app.setRecordListStyle(body.length ? { body } : { body: 'DEFAULT' });
+        return;
+      } catch (e) {
+        // 公式 API が使えない環境では、一覧のセル要素（getFieldElements）で装飾する
+      }
+    }
+    applyHighlightByElements(results, records, columns);
+  }
+
+  function applyHighlightByElements(results, records, columns) {
+    if (typeof kintone.app.getFieldElements !== 'function') return;
+    const byId = {};
+    results.forEach((r) => { byId[r.recordId] = r; });
+    const indexToId = records.map((rec) => (rec.$id ? String(rec.$id.value) : null));
+    columns.forEach((code) => {
+      const cells = kintone.app.getFieldElements(code) || [];
+      cells.forEach((cell, i) => {
+        const r = byId[indexToId[i]];
+        const name = r ? (r.cells[code] || r.row) : null;
+        const p = name ? LS.STYLE_PRESETS[name] : null;
+        cell.style.backgroundColor = p && p.background ? p.background : '';
+        cell.style.color = p && p.color ? p.color : '';
+        cell.style.fontWeight = p && p.bold ? 'bold' : '';
+      });
+    });
+  }
+
+  // ---------- まとめて実行 ----------
+  function runListSupport(event) {
+    const ls = state.config.ls;
+    const viewType = event && event.viewType;
+    const isTable = !viewType || viewType === 'list';
+    const needPanel = ls.quickFilter.enabled || ls.quickButtons.enabled || (ls.summary.enabled && isTable);
+    if (needPanel) {
+      const root = ensurePanel();
+      const sum = root && root.querySelector('#nrc-ls-summary');
+      if (sum) sum.hidden = !isTable;
+    }
+    if (isTable && ls.highlight.enabled && ls.highlight.rules.length) track(applyHighlight(event).catch(() => {}));
+    if (isTable && ls.summary.enabled) track(updateSummary().catch(() => {}));
+  }
+
+  // テストから非同期処理の完了を待つための入口
+  window.NrcListSupportRuntime = {
+    idle: () => Promise.all(state.pending.splice(0))
+  };
+
+  // =========================
   // 一覧表示イベント
   // =========================
   kintone.events.on('app.record.index.show', async function (event) {
     const config = getPluginConfig();
-    if (!config.targets || config.targets.length === 0) return event;
+    const ls = config.ls;
+    const searchOn = ls.search.enabled && config.targets && config.targets.length > 0;
+    const lsOn = ls.quickFilter.enabled || ls.quickButtons.enabled || ls.summary.enabled || ls.highlight.enabled;
+    if (!searchOn && !lsOn) return event;
+
+    // プラグインの query が残ったまま標準の絞り込み（q）か一覧が変わった: query があると新しい絞り込みが
+    // 使われないので、プラグインの条件を外して開き直す（開き直した先で「解除しました」と知らせる）
+    if (urlState().reset) {
+      const url = LS.buildResetUrl(location.href);
+      if (typeof location.replace === 'function') location.replace(url); else location.href = url;
+      return event;
+    }
 
     const firstTime = !state.config;
     state.config = config;
@@ -745,26 +1319,30 @@
     }
 
     ensureStyles();
-    if (!ensureSearchUI()) return event;
-    ensureOutsideClickHandler();
-
-    // まず設定値ベースで表示（照合完了前でも検索できる）
-    fillKeywordIfExists();
-    renderMode();
-    renderTargetsInfo();
-    renderStatus();
+    const searchUi = searchOn ? ensureSearchUI() : null;
+    if (searchUi) {
+      ensureOutsideClickHandler();
+      // まず設定値ベースで表示（照合完了前でも検索できる）
+      fillKeywordIfExists();
+      renderMode();
+      renderTargetsInfo();
+      renderStatus();
+    }
 
     // 現在のフィールド定義との照合はページ内で 1 回だけ
     if (!state.validation) state.validation = runValidation(config);
     await state.validation;
 
     // 照合中にヘッダーが作り直された場合に備えて UI を確保し直してから反映
-    if (ensureSearchUI()) {
+    if (searchOn && ensureSearchUI()) {
       fillKeywordIfExists();
       renderMode();
       renderTargetsInfo();
       renderStatus();
     }
+
+    // 一覧サポート（集計・装飾は一覧の表示を待たせないよう非同期で進める）
+    if (lsOn) runListSupport(event);
 
     return event;
   });

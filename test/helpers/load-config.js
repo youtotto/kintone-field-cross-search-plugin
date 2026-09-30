@@ -8,6 +8,7 @@ const { defaultFields } = require('./load-desktop');
 
 const CONFIG_HTML = path.resolve(__dirname, '../../source/config.html');
 const CONFIG_JS = path.resolve(__dirname, '../../source/js/config.js');
+const CORE_JS = path.resolve(__dirname, '../../source/js/ls-core.js');
 
 function configFields() {
   return {
@@ -21,7 +22,7 @@ function configFields() {
   };
 }
 
-async function loadConfigScreen({ config = {}, fields = configFields(), failFields = false } = {}) {
+async function loadConfigScreen({ config = {}, fields = configFields(), failFields = false, statusStates = null } = {}) {
   const html = fs.readFileSync(CONFIG_HTML, 'utf8');
   const js = fs.readFileSync(CONFIG_JS, 'utf8');
 
@@ -44,12 +45,17 @@ async function loadConfigScreen({ config = {}, fields = configFields(), failFiel
         return JSON.parse(JSON.stringify(fields));
       }
     },
+    api: Object.assign(async (url) => {
+      if (/status/.test(url) && statusStates) return { enable: true, states: statusStates };
+      return { enable: false };
+    }, { url: (p) => p }),
     plugin: { app: {
       getConfig: () => JSON.parse(JSON.stringify(config)),
       setConfig: (conf) => { saved = conf; } // 保存後の画面遷移（コールバック）は呼ばない
     } }
   };
 
+  window.eval(fs.readFileSync(CORE_JS, 'utf8'));
   window.eval(js);
   await new Promise((r) => setTimeout(r, 30));
 
@@ -67,9 +73,20 @@ async function loadConfigScreen({ config = {}, fields = configFields(), failFiel
       return saved ? {
         raw: saved,
         targets: JSON.parse(saved.targetsJson),
-        snapshot: JSON.parse(saved.fieldSnapshotJson)
+        snapshot: JSON.parse(saved.fieldSnapshotJson),
+        ls: saved.lsConfig ? JSON.parse(saved.lsConfig) : null
       } : null;
-    }
+    },
+    /** 要素にイベントを送る（select / input の変更） */
+    change(elm, value, type = 'change') {
+      if (value !== undefined) {
+        if (elm.type === 'checkbox') elm.checked = Boolean(value); else elm.value = value;
+      }
+      elm.dispatchEvent(new window.Event(type, { bubbles: true }));
+    },
+    $: (sel) => doc.querySelector(sel),
+    $$: (sel) => Array.from(doc.querySelectorAll(sel)),
+    savedRaw() { return saved; }
   };
 }
 

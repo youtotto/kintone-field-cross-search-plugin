@@ -1,11 +1,13 @@
 {
   "name": "kintone-field-cross-search-plugin",
   "private": true,
-  "description": "Test runner for the Field Cross Search plugin (jsdom-based, no runtime dependencies)",
+  "description": "一覧サポート for kintone（旧: 横断検索プラグイン）. Tests: node:test + jsdom. Build: @kintone/plugin-packer",
   "scripts": {
+    "build": "node scripts/build.js",
     "test": "node --test \"test/**/*.test.js\""
   },
   "devDependencies": {
+    "@kintone/plugin-packer": "8.2.0",
     "jsdom": "29.1.1"
   }
 }

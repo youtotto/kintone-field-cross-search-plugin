@@ -148,12 +148,14 @@ describe('AND / OR は初期値の設定（利用者が一覧画面で切り替�
     assert.match(html, /検索画面を開いたときの AND \/ OR の初期値を設定します。利用者は一覧画面上で切り替えられます。/);
   });
 
-  test('設定 JSON の構造は変更なし（spaceJoin / maxTokens / targetsJson / fieldSnapshotJson のみ）', async () => {
+  test('設定 JSON: v1 のキー（spaceJoin / maxTokens / targetsJson / fieldSnapshotJson）はそのまま、一覧サポートの設定は lsConfig に追加', async () => {
     const ui = await loadConfigScreen();
     ui.checkbox('顧客名').checked = true;
     ui.document.getElementById('spaceJoin').value = 'or';
     const s = ui.save();
-    assert.deepEqual(Object.keys(s.raw).sort(), ['fieldSnapshotJson', 'maxTokens', 'spaceJoin', 'targetsJson']);
+    assert.deepEqual(Object.keys(s.raw).sort(), ['fieldSnapshotJson', 'lsConfig', 'maxTokens', 'spaceJoin', 'targetsJson']);
     assert.equal(s.raw.spaceJoin, 'or');
+    assert.equal(s.ls.version, 2);
+    assert.equal(s.ls.search.enabled, true);
   });
 });
