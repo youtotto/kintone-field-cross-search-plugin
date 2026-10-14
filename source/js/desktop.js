@@ -1288,6 +1288,19 @@
     idle: () => Promise.all(state.pending.splice(0))
   };
 
+  // 個別削除では index.show が再発火しない場合もあるため、成功時に直接集計を更新する。
+  // 削除前イベントには登録しない（取消・削除失敗でキャッシュを変更しない）。
+  kintone.events.on('app.record.index.delete.submit.success', function (event) {
+    state.summaryCache = null;
+    // DOM がなくても削除前の通信結果・進捗・エラーを無効化する。
+    state.summarySeq++;
+    const row = document.getElementById('nrc-ls-summary');
+    if (state.config && state.config.ls.summary.enabled && row && !row.hidden) {
+      track(updateSummary().catch(() => {}));
+    }
+    return event;
+  });
+
   // =========================
   // 一覧表示イベント
   // =========================

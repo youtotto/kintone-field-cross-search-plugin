@@ -130,6 +130,7 @@ function loadDesktop({ config = {}, search = '', currentFields = defaultFields()
     k.api = async (url, method, params) => {
       apiCalls.push({ url, method, params: JSON.parse(JSON.stringify(params)) });
       if (ls.apiError) throw ls.apiError;
+      if (ls.getRecords) return ls.getRecords(params);
       const m = /\$id > (\d+)/.exec(params.query || '');
       const after = m ? Number(m[1]) : 0;
       const lim = Number((/limit (\d+)/.exec(params.query || '') || [])[1] || 500);
@@ -150,6 +151,10 @@ function loadDesktop({ config = {}, search = '', currentFields = defaultFields()
 
   return {
     window, document, navigations, replaced,
+    emit(type, extra = {}) {
+      const event = { type, appId: 123, ...extra };
+      return handlers[type] ? handlers[type](event) : event;
+    },
     getFormFieldsCalls: () => getFormFieldsCalls,
     /** index.show を発火（records: 一覧に表示中のレコード配列） */
     async show(records = [{}], extra = {}) {
